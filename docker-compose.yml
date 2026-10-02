@@ -1,0 +1,25 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: infra-postgres
+
+    environment:
+      POSTGRES_DB: observability
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d observability"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
