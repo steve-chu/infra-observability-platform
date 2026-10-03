@@ -43,7 +43,6 @@ def get_sites():
 
 #build sucessfully with code 201
 @app.post("/sites", status_code=201)
-
 def create_site(site: SiteCreate):
 
     try:
@@ -67,3 +66,22 @@ def create_site(site: SiteCreate):
         )
     
     return new_site
+
+
+@app.get("/sites/{site_id}")
+def get_site(site_id: int):
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT site_id, name, location FROM sites WHERE site_id = %s;",
+                (site_id,)
+            )
+            site = cursor.fetchone()
+
+            if site is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Site not found"
+                )
+            
+    return site
