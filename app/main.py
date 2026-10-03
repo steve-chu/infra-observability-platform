@@ -37,13 +37,11 @@ class AssetCreate(BaseModel):
 
 #http connection check
 @app.get("/health")
-
 def health():
     return {"status": "ok"}
 
 # get sites data
 @app.get("/sites")
-
 def get_sites():
 
     #build conn between API n postgre, use with auto close channel
@@ -59,7 +57,7 @@ def get_sites():
     return sites
 
 
-#build sucessfully with code 201
+#build site sucessfully with code 201, SiteCreate site input n white space check
 @app.post("/sites", status_code=201)
 def create_site(site: SiteCreate):
 
@@ -96,7 +94,7 @@ def get_site(site_id: int):
             )
             site = cursor.fetchone()
 
-            if site is None:
+            if site is None: #empty result catch
                 raise HTTPException(
                     status_code=404,
                     detail="Site not found"
@@ -104,6 +102,7 @@ def get_site(site_id: int):
             
     return site
 
+#create assets with AssetCreate input value check n whitespace remove
 @app.post("/assets", status_code=201)
 def create_asset(asset: AssetCreate):
     try:
@@ -124,12 +123,15 @@ def create_asset(asset: AssetCreate):
                 )
 
                 new_asset = cursor.fetchone()
+
+    #catch when site value not exist
     except ForeignKeyViolation:
         raise HTTPException(
             status_code=404,
             detail="Site not found"
         )
 
+    #catch when site n name not unique pair
     except UniqueViolation:
         raise HTTPException(
             status_code=409,
@@ -137,4 +139,43 @@ def create_asset(asset: AssetCreate):
         )
     
     return new_asset
+
+
+@app.get("/assets")
+#optional input site_id n status 
+def get_assets(
+    site_id: int | None = None,
+    status: Literal["healthy", "degraded", "unhealthy", "maintenance"] | None = None
+    ):
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            
+            #use dynamic query clause for SQL query use
+            conditions = []
+            params = []
+
+            if site_id is not None:
+                conditions.append("site_id = %s")
+                params.append(site_id)
+
+            if status is not None:
+                conditions.append("status = %s")
+                params.append(status)
+
+            where_clause = ""
+
+            if conditions:
+                where_clause = " WHERE " + " AND ".join(conditions)
+
+            query = f"""
+            SELECT asset_id, site_id, asset_name, asset_type, status, created_at, updated_at
+            FROM assets
+            {where_clause}
+            ORDER BY asset_id;
+            """
+
+            cursor.execute(query, params)
+
+            assets = cursor.fetchall()
+    return assets
 
