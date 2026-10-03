@@ -149,7 +149,7 @@ def get_assets(
     ):
     with get_connection() as conn:
         with conn.cursor() as cursor:
-            
+
             #use dynamic query clause for SQL query use
             conditions = []
             params = []
@@ -179,3 +179,30 @@ def get_assets(
             assets = cursor.fetchall()
     return assets
 
+
+@app.get("/assets/{asset_id}")
+def get_asset(asset_id: int):
+
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT asset_id, site_id, asset_name, asset_type, status, created_at, updated_at
+                FROM assets
+                WHERE asset_id = %s;
+                """,
+                (asset_id,)
+            )
+           
+            asset = cursor.fetchone()
+
+    if asset is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Asset not found"
+        )
+    
+    return asset
+
+
+    
