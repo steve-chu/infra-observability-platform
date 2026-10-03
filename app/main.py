@@ -34,6 +34,10 @@ class AssetCreate(BaseModel):
             return value.strip()
         return value
 
+class AssetStatusUpdate(BaseModel):
+    status: Literal["healthy", "degraded", "unhealthy", "maintenance"]
+
+
 
 #http connection check
 @app.get("/health")
@@ -204,5 +208,28 @@ def get_asset(asset_id: int):
     
     return asset
 
+@app.patch("/assets/{asset_id}/status")
+def update_asset_status(asset_id: int, update: AssetStatusUpdate):
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE assets
+                SET status = %s,
+                    updated_at = NOW()
+                WHERE asset_id = %s
+                RETURNING asset_id, site_id, asset_name, asset_type, status, created_at, updated_at;
+                """,
+                (
+                    update.status,
+                    asset_id
+                )
+            )
+            updated_asset = cursor.fetchone()
 
-    
+            if updated_asset is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Asset not found"
+                )
+    return updated_asset
