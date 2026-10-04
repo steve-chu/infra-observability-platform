@@ -1,4 +1,5 @@
 from typing import Literal
+from datetime import datetime
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field, field_validator
@@ -274,3 +275,60 @@ def create_metric(metric:MetricCreate):
         )
 
     return new_metric
+
+@app.get("/metrics")
+def get_metrics(
+    asset_id: int | None = None,
+    metric_type: str | None = None,
+    start_time: datetime | None = None,
+    end_time: datetime | None = None
+    ):
+        if (
+            start_time is not None
+            and end_time is not None
+            and start_time > end_time
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="start_time must be before end_time"
+            )
+
+        with get_connection() as conn:
+            with conn.cursor() as cursor:
+                conditions = []
+                params = []
+
+                if asset_id is not None:
+                    conditions.append("asset_id = %s")
+                    params.append(asset_id)
+
+                if metric_type is not None:
+                    conditions.append("metric_type = %s")
+                    params.append(metric_type)
+
+                if start_time is not None:
+                    conditions.append("recorded_at >= %s")
+                    params.append(start_time)
+
+                if end_time is not None:
+                    conditions.append("recorded_at <= %s")
+                    params.append(end_time)
+
+
+                where_clause = ""
+
+                if conditions:
+                    where_clause = " WHERE " + " AND ".join(conditions) 
+
+                query = f"""
+                SELECT metric_id, asset_id, metric_type, metric_value, recorded_at
+                FROM metrics
+                {where_clause}
+                ORDER BY recorded_at DESC
+
+                """             
+                
+                cursor.execute(query, params)
+                metrics = cursor.fetchall()
+        return metrics
+    
