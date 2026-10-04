@@ -50,6 +50,21 @@ class MetricCreate(BaseModel):
             return value.strip()
         return value
 
+class IncidentCreate(BaseModel):
+    asset_id: int = Field(gt=0)
+    incident_type: str = Field(min_length=1, max_length=50)
+    severity: Literal["low", "medium", "high", "critical"]
+    message: str | None = None
+
+    @field_validator("incident_type", "message", mode="before")
+    @classmethod
+    def strip_whitespace(cls, value):
+        if isinstance(value, str):
+            return value.strip()
+        return value
+
+class IncidentStatusUpdate(BaseModel):
+    status: Literal["open", "investigating", "resolved", "closed"]
 
 
 #http connection check
@@ -213,7 +228,7 @@ def get_asset(asset_id: int):
            
             asset = cursor.fetchone()
 
-    if asset is None:
+    if asset is None: #asset not found error handling
         raise HTTPException(
             status_code=404,
             detail="Asset not found"
@@ -221,6 +236,7 @@ def get_asset(asset_id: int):
     
     return asset
 
+#modify asset status
 @app.patch("/assets/{asset_id}/status")
 def update_asset_status(asset_id: int, update: AssetStatusUpdate):
     with get_connection() as conn:
@@ -248,7 +264,7 @@ def update_asset_status(asset_id: int, update: AssetStatusUpdate):
     return updated_asset
 
 
-
+#upload asset metric
 @app.post("/metrics", status_code=201)
 def create_metric(metric:MetricCreate):
     try:
@@ -268,6 +284,7 @@ def create_metric(metric:MetricCreate):
                 )
 
                 new_metric = cursor.fetchone()
+    #asset not found handling
     except ForeignKeyViolation:
         raise HTTPException(
             status_code=404,
@@ -276,6 +293,7 @@ def create_metric(metric:MetricCreate):
 
     return new_metric
 
+#time period search handling
 @app.get("/metrics")
 def get_metrics(
     asset_id: int | None = None,
@@ -331,4 +349,146 @@ def get_metrics(
                 cursor.execute(query, params)
                 metrics = cursor.fetchall()
         return metrics
+
+@app.post("/incidents", status_code=201)
+def create_incident(incident: IncidentCreate):
+    try:
+        with get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO incidents (
+                        asset_id,
+                        incident_type,
+                        severity,
+                        message
+                    )
+                    VALUES (%s, %s, %s, %s)
+                    RETURNING
+                        incident_id,
+                        asset_id,
+                        incident_type,
+                        severity,
+                        status,
+                        message,
+                        detected_at,
+                        resolved_at;
+                    """,
+                    (
+                        incident.asset_id,
+                        incident.incident_type,
+                        incident.severity,
+                        incident.message
+                    )
+                )
+
+                new_incident = cursor.fetchone()
+    except ForeignKeyViolation:
+        raise HTTPException(
+            status_code=404,
+            detail="Asset not found"
+        )
+    return new_incident
+
+
+@app.get("/incidents")
+def get_incidents(
+    asset_id: int | None = None,
+    severity: Literal["low", "medium", "high", "critical"] | None = None,
+    status: Literal["open", "investigating", "resolved", "closed"] | None = None
+):
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            conditions = []
+            params = []
+
+            if asset_id is not None:
+                conditions.append("asset_id = %s")
+                params.append(asset_id)
+
+            if severity is not None:
+                conditions.append("severity = %s")
+                params.append(severity)
+
+            if status is not None:
+                conditions.append("status = %s")
+                params.append(status)
+
+            where_clause = ""
+
+            if conditions:
+                where_clause = " WHERE " + " AND ".join(conditions)
+
+            query = f"""
+            SELECT incident_id, asset_id, incident_type, severity, status, message, detected_at, resolved_at
+            FROM incidents
+            {where_clause}
+            ORDER BY detected_at DESC;
+            """
+
+            cursor.execute(query, params)
+            incidents = cursor.fetchall()
+
+    return incidents
+
+#modify incident status with conditions
+@app.patch("/incidents/{incident_id}/status")
+def update_incident_status(
+    incident_id: int,
+    update: IncidentStatusUpdate
+):
     
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT incident_id, status
+                FROM incidents
+                WHERE incident_id = %s;
+                """,
+                (incident_id,)
+            )
+
+            incident = cursor.fetchone()
+
+            # check if incident exists
+            if incident is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Incident not found"
+                )
+            current_status = incident["status"]
+            #rule for incident transitioning
+            allowed_transitions = {
+                "open": {"investigating"},
+                "investigating": {"resolved"},
+                "resolved": {"closed"},
+                "closed": set()
+            }
+
+            if update.status not in allowed_transitions[current_status]:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Cannot change incident status from {current_status} to {update.status}"
+                )
+
+            cursor.execute(
+                """
+                UPDATE incidents
+                SET status = %s,
+                    resolved_at = CASE
+                        WHEN %s = 'resolved' THEN NOW()
+                        ELSE resolved_at
+                    END
+                WHERE incident_id = %s
+                RETURNING incident_id, asset_id, incident_type, severity, status, message, detected_at, resolved_at;
+                """,
+                (
+                    update.status,
+                    update.status,
+                    incident_id
+                )
+            )
+    
+            updated_incident = cursor.fetchone()
+    return updated_incident
