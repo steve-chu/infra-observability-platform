@@ -37,6 +37,18 @@ class AssetCreate(BaseModel):
 class AssetStatusUpdate(BaseModel):
     status: Literal["healthy", "degraded", "unhealthy", "maintenance"]
 
+class MetricCreate(BaseModel):
+    asset_id: int = Field(gt=0)
+    metric_type: str = Field(min_length=1, max_length=50)
+    metric_value: float
+
+    @field_validator("metric_type", mode="before")
+    @classmethod
+    def strip_whitespace(cls, value):
+        if isinstance(value, str):
+            return value.strip()
+        return value
+
 
 
 #http connection check
@@ -233,3 +245,32 @@ def update_asset_status(asset_id: int, update: AssetStatusUpdate):
                     detail="Asset not found"
                 )
     return updated_asset
+
+
+
+@app.post("/metrics", status_code=201)
+def create_metric(metric:MetricCreate):
+    try:
+        with get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO metrics (asset_id, metric_type, metric_value)
+                    VALUES (%s, %s, %s)
+                    RETURNING metric_id, asset_id, metric_type, metric_value, recorded_at;
+                    """,
+                    (
+                        metric.asset_id,
+                        metric.metric_type,
+                        metric.metric_value
+                    )
+                )
+
+                new_metric = cursor.fetchone()
+    except ForeignKeyViolation:
+        raise HTTPException(
+            status_code=404,
+            detail="Asset not found"
+        )
+
+    return new_metric
