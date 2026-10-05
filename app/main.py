@@ -4,7 +4,7 @@ from datetime import datetime
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field, field_validator
 from psycopg.errors import UniqueViolation, ForeignKeyViolation
-
+import psycopg
 from app.db import get_connection
 
 app = FastAPI()
@@ -71,6 +71,24 @@ class IncidentStatusUpdate(BaseModel):
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+#get api db connection status
+@app.get("/ready")
+def readiness():
+    try:
+        with get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT 1;")
+                cursor.fetchone()
+        return {"status":"ready"}
+
+    except psycopg.Error:
+        raise HTTPException(
+            status_code=503,
+            detail="Database is not ready"
+        )
+
+
 
 # get sites data
 @app.get("/sites")
