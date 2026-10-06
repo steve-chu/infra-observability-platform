@@ -1,13 +1,88 @@
 from typing import Literal
 from datetime import datetime
+import time
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response, Request
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST, Counter, Histogram
 from pydantic import BaseModel, Field, field_validator
 from psycopg.errors import UniqueViolation, ForeignKeyViolation
 import psycopg
 from app.db import get_connection
 
 app = FastAPI()
+
+
+telemetry_ingested_total = Counter(
+    "telemetry_ingested_total",
+    "Total number of telemetry metric successfully ingested"
+)
+
+#define request_total counter label
+http_request_total = Counter(
+    "http_requests_total",
+    "Total HTTP requests",
+    ["method", "endpoint", "status"]
+)
+
+#define request_duration histogram label
+http_request_duration_seconds = Histogram(
+    "http_request_duration_seconds",
+    "HTTP request latency in seconds",
+    ["method", "endpoint"]
+)
+
+#perceive all http request
+@app.middleware("http")
+async def prometheus_middleware(request: Request, call_next):
+    #record time when api request happen
+    start_time = time.perf_counter()
+
+    #collect API request status response 
+    response = await call_next(request)
+
+    #record when API request successfully respond
+    elapsed = time.perf_counter() - start_time
+
+    #get method route ex. /assets/{asset_id} not for specific ID!!!
+    route = request.scope.get("route")
+
+    #save route path
+    endpoint = (
+        route.path
+        if route is not None
+        else "unmatched"
+    )
+    #ignore prometheus API request
+    if endpoint != "/prometheus":
+
+        #save it as a metric for prometheus counter +1   
+        http_request_total.labels(
+            method=request.method,
+            endpoint=endpoint,
+            status=str(response.status_code) #str for prometheus use!!!
+        ).inc()
+
+        #save time record detail to histogram
+        http_request_duration_seconds.labels(
+            method=request.method,
+            endpoint=endpoint
+        ).observe(elapsed)
+
+    return response
+    
+
+
+#export prometheus data from registry
+@app.get("/prometheus")
+def prometheus_metrics():
+    return Response(
+        content=generate_latest(),
+        media_type=CONTENT_TYPE_LATEST
+    )
+
+
+
+
 
 #type check, word len check, str white space strip
 class SiteCreate(BaseModel):
@@ -302,6 +377,9 @@ def create_metric(metric:MetricCreate):
                 )
 
                 new_metric = cursor.fetchone()
+
+        telemetry_ingested_total.inc()
+
     #asset not found handling
     except ForeignKeyViolation:
         raise HTTPException(
