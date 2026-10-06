@@ -1,5 +1,4 @@
 import os
-import psycopg
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
@@ -19,6 +18,7 @@ pool = ConnectionPool(
     },
     min_size=2,
     max_size=10,
+    timeout=2,
     open=True
 )
 
