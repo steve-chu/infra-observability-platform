@@ -483,6 +483,10 @@ clamp_min(
 * 100
 ```
 
+### Dashboard
+
+![Grafana API Observability Dashboard](docs/images/grafana-dashboard.png)
+
 ---
 
 ## Grafana Dashboard
@@ -775,6 +779,10 @@ Normal
 證明從 application failure 到 monitoring alert 的完整資料鏈可以運作。
 
 目前 V1 主要驗證 alert state，外部 Email / Slack notification 不列入主要範圍。
+
+### Failure Alert
+
+![Grafana High HTTP 5xx Alert Firing](docs/images/grafana-alert.png)
 
 ---
 
