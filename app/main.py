@@ -2,7 +2,7 @@ from typing import Literal
 from datetime import datetime
 import time
 
-from fastapi import FastAPI, HTTPException, Response, Request
+from fastapi import FastAPI, HTTPException, Response, Request, Query
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST, Counter, Histogram
 from pydantic import BaseModel, Field, field_validator
 from psycopg.errors import UniqueViolation, ForeignKeyViolation
@@ -395,7 +395,8 @@ def get_metrics(
     asset_id: int | None = None,
     metric_type: str | None = None,
     start_time: datetime | None = None,
-    end_time: datetime | None = None
+    end_time: datetime | None = None,
+    limit: int = Query(default=100, ge=1, le=1000)
     ):
         if (
             start_time is not None
@@ -428,6 +429,7 @@ def get_metrics(
                     conditions.append("recorded_at <= %s")
                     params.append(end_time)
 
+                params.append(limit)
 
                 where_clause = ""
 
@@ -439,7 +441,7 @@ def get_metrics(
                 FROM metrics
                 {where_clause}
                 ORDER BY recorded_at DESC
-
+                LIMIT %s
                 """             
                 
                 cursor.execute(query, params)
